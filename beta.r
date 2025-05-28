@@ -26,8 +26,17 @@ clean_text <- function(text) {
   return(text)
 }
 
+# Function to handle negations better
+handle_negations <- function(text) {
+  # Common negation patterns
+  text <- str_replace_all(text, "\\b(no|not|never|none|nobody|nothing|neither|nowhere|barely|hardly|scarcely|seldom|rarely)\\s+", "NOT_")
+  text <- str_replace_all(text, "\\b(can't|cannot|won't|wouldn't|shouldn't|couldn't|doesn't|don't|didn't|isn't|aren't|wasn't|weren't|hasn't|haven't|hadn't)\\s+", "NOT_")
+  text <- str_replace_all(text, "\\b(zero|lack of|absence of)\\s+", "NOT_")
+  return(text)
+}
+
 # Clean the content column
-data$cleaned_content <- sapply(data$Content, clean_text)
+data$cleaned_content <- sapply(data$Content, function(x) handle_negations(clean_text(x)))
 
 # Remove empty or very short posts (less than 10 characters)
 data <- data %>%
@@ -39,15 +48,36 @@ tokens <- data %>%
   unnest_tokens(word, cleaned_content) %>%
   anti_join(stop_words, by = "word") %>%
   # Remove specific terms that may skew sentiment analysis
-  filter(!word %in% c("president", "trump")) %>%
+  filter(!word %in% c("president", "trump", "donald", "administration", "white", "house", "government", "political", "politics", "policy", "policies")) %>%
   # Remove numbers and single characters
   filter(!str_detect(word, "^\\d+$")) %>%
   filter(nchar(word) > 1)
 
-# Get sentiment scores using the syuzhet package (NRC sentiment lexicon)
+# Get sentiment scores using multiple lexicons for better accuracy
+sentiment_afinn <- tokens %>%
+  inner_join(get_sentiments("afinn"), by = "word")
+
 sentiment_nrc <- tokens %>%
   inner_join(get_sentiments("nrc"), by = "word") %>%
   filter(sentiment %in% c("positive", "negative", "joy", "anger", "fear", "sadness", "trust", "disgust"))
+
+# Calculate AFINN-based sentiment scores (numeric values)
+post_sentiment_afinn <- sentiment_afinn %>%
+  group_by(Post_ID) %>%
+  summarise(
+    sentiment_score = sum(value),
+    word_count = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # Apply minimum threshold for classification
+    overall_sentiment = case_when(
+      word_count < 3 ~ "Neutral",  # Too few sentiment words
+      sentiment_score >= 2 ~ "Positive",
+      sentiment_score <= -2 ~ "Negative", 
+      TRUE ~ "Neutral"
+    )
+  )
 
 # Categorize sentiments into positive, negative, neutral
 sentiment_nrc$sentiment_category <- case_when(
@@ -56,20 +86,38 @@ sentiment_nrc$sentiment_category <- case_when(
   TRUE ~ "Neutral"
 )
 
-# Calculate sentiment by post
-post_sentiment <- sentiment_nrc %>%
+# Calculate sentiment by post using NRC method
+post_sentiment_nrc <- sentiment_nrc %>%
   group_by(Post_ID, sentiment_category) %>%
   summarise(count = n(), .groups = "drop") %>%
   pivot_wider(names_from = sentiment_category, values_from = count, values_fill = 0) %>%
   mutate(
     total_sentiment = Positive + Negative,
-    overall_sentiment = case_when(
+    overall_sentiment_nrc = case_when(
       total_sentiment == 0 ~ "Neutral",
       Positive > Negative ~ "Positive",
       Negative > Positive ~ "Negative",
       TRUE ~ "Neutral"
     )
   )
+
+# Combine AFINN and NRC results for better accuracy
+post_sentiment <- post_sentiment_afinn %>%
+  left_join(post_sentiment_nrc %>% select(Post_ID, overall_sentiment_nrc), by = "Post_ID") %>%
+  mutate(
+    # Use AFINN as primary, NRC as secondary
+    final_sentiment = case_when(
+      # If AFINN is neutral but NRC shows strong signal, use NRC
+      overall_sentiment == "Neutral" & !is.na(overall_sentiment_nrc) ~ overall_sentiment_nrc,
+      # Otherwise use AFINN
+      !is.na(overall_sentiment) ~ overall_sentiment,
+      # Fallback to NRC if AFINN is missing
+      !is.na(overall_sentiment_nrc) ~ overall_sentiment_nrc,
+      # Last resort
+      TRUE ~ "Neutral"
+    )
+  ) %>%
+  select(Post_ID, sentiment_score, word_count, overall_sentiment = final_sentiment)
 
 # Calculate overall percentages
 sentiment_summary <- post_sentiment %>%
@@ -183,8 +231,7 @@ for(sentiment_cat in c("Positive", "Negative")) {
     filter(sentiment_category == sentiment_cat) %>%
     top_n(10, n) %>%
     arrange(desc(n))
-  
-  for(i in 1:min(10, nrow(top_words))) {
+    for(i in seq_len(min(10, nrow(top_words)))) {
     cat(paste0(i, ". ", top_words$word[i], " (", top_words$n[i], " occurrences)\n"))
   }
 }
