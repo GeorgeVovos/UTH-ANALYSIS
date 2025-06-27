@@ -3,6 +3,7 @@ library(readr)
 library(dplyr)
 library(stringr)
 library(tidytext)
+library(tidyr)
 library(textclean)
 library(syuzhet)
 library(wordcloud)
@@ -241,3 +242,41 @@ for(sentiment_cat in c("Positive", "Negative")) {
 #write_csv(top_sentiment_words, "top_sentiment_words.csv")
 
 #cat("\nAnalysis complete! Results saved to CSV files.\n")
+
+# Some basic clustering using K-Means
+# Create user emotion profiles (anger vs joy)
+user_emotions <- sentiment_nrc %>%
+  left_join(data %>% select(`Post ID`, Username), by = c("Post_ID" = "Post ID")) %>%
+  filter(!is.na(Username)) %>%
+  group_by(Username, sentiment) %>%
+  summarise(emotion_count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = sentiment, values_from = emotion_count, values_fill = 0) %>%
+  filter(rowSums(select(., -Username)) >= 2) %>%
+  select(Username, anger, joy)
+
+# Perform simple k-means clustering (k=3)
+set.seed(123)
+if(nrow(user_emotions) >= 3) {
+  cluster_data <- user_emotions %>%
+    mutate(
+      anger_norm = scale(anger)[,1],
+      joy_norm = scale(joy)[,1]
+    ) %>%
+    filter(complete.cases(.))
+  
+
+  kmeans_result <- kmeans(cluster_data[,c("anger_norm", "joy_norm")], centers = 3, nstart = 10)
+  cluster_data$cluster <- as.factor(kmeans_result$cluster)
+  
+  # Simple scatter plot
+  cluster_plot <- ggplot(cluster_data, aes(x = anger_norm, y = joy_norm, color = cluster)) +
+    geom_point(size = 3) +
+    labs(title = "User Clustering: Anger vs Joy", x = "Anger (normalized)", y = "Joy (normalized)") +
+    theme_minimal()
+  
+  print(cluster_plot)
+  cat("Clustered", nrow(cluster_data), "users into 3 groups\n")
+  
+} else {
+  cat("Not enough users for clustering\n")
+}
