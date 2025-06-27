@@ -1,4 +1,3 @@
-# Load required libraries
 library(readr)
 library(dplyr)
 library(stringr)
@@ -11,32 +10,24 @@ library(RColorBrewer)
 library(ggplot2)
 library(scales)
 
-# Load the data
 
 data <- read_csv("C:/dev/UTH/UTH-ANALYSIS/mastodon_posts_Trump_3000.csv")
 
 clean_text <- function(text) {
-  # Remove HTML tags
   text <- str_remove_all(text, "<[^>]*>")
-  # Remove URLs
   text <- str_remove_all(text, "https?://[^\\s]+")
-  # Remove extra whitespace
   text <- str_squish(text)
-  # Convert to lowercase
   text <- tolower(text)
   return(text)
 }
 
-# Function to handle negations better
 handle_negations <- function(text) {
-  # Common negation patterns
   text <- str_replace_all(text, "\\b(no|not|never|none|nobody|nothing|neither|nowhere|barely|hardly|scarcely|seldom|rarely)\\s+", "NOT_")
   text <- str_replace_all(text, "\\b(can't|cannot|won't|wouldn't|shouldn't|couldn't|doesn't|don't|didn't|isn't|aren't|wasn't|weren't|hasn't|haven't|hadn't)\\s+", "NOT_")
   text <- str_replace_all(text, "\\b(zero|lack of|absence of)\\s+", "NOT_")
   return(text)
 }
 
-# Clean the content column
 data$cleaned_content <- sapply(data$Content, function(x) handle_negations(clean_text(x)))
 
 # Remove empty or very short posts (less than 10 characters)
@@ -73,14 +64,14 @@ post_sentiment_afinn <- sentiment_afinn %>%
   mutate(
     # Apply minimum threshold for classification
     overall_sentiment = case_when(
-      word_count < 3 ~ "Neutral",  # Too few sentiment words
+      word_count < 3 ~ "Neutral",
       sentiment_score >= 2 ~ "Positive",
       sentiment_score <= -2 ~ "Negative", 
       TRUE ~ "Neutral"
     )
   )
 
-# Categorize sentiments into positive, negative, neutral
+
 sentiment_nrc$sentiment_category <- case_when(
   sentiment_nrc$sentiment %in% c("positive", "joy", "trust") ~ "Positive",
   sentiment_nrc$sentiment %in% c("negative", "anger", "fear", "sadness", "disgust") ~ "Negative",
@@ -108,13 +99,9 @@ post_sentiment <- post_sentiment_afinn %>%
   mutate(
     # Use AFINN as primary, NRC as secondary
     final_sentiment = case_when(
-      # If AFINN is neutral but NRC shows strong signal, use NRC
       overall_sentiment == "Neutral" & !is.na(overall_sentiment_nrc) ~ overall_sentiment_nrc,
-      # Otherwise use AFINN
       !is.na(overall_sentiment) ~ overall_sentiment,
-      # Fallback to NRC if AFINN is missing
       !is.na(overall_sentiment_nrc) ~ overall_sentiment_nrc,
-      # Last resort
       TRUE ~ "Neutral"
     )
   ) %>%
@@ -133,13 +120,11 @@ sentiment_words <- sentiment_nrc %>%
   count(word, sentiment_category) %>%
   arrange(desc(n))
 
-# Filter top words for word cloud
 top_sentiment_words <- sentiment_words %>%
   group_by(sentiment_category) %>%
   top_n(50, n) %>%
   ungroup()
 
-# Create color palette
 colors <- c("Positive" = "#2E8B57", "Negative" = "#DC143C", "Neutral" = "#708090")
 
 # Word Cloud
@@ -188,7 +173,7 @@ emotion_summary <- sentiment_nrc %>%
   count(sentiment) %>%
   mutate(percentage = n / sum(n) * 100)
 
-# Create color palette for emotions
+
 emotion_colors <- c(
   "positive" = "#2E8B57", "joy" = "#FFD700", "trust" = "#4169E1",
   "negative" = "#DC143C", "anger" = "#FF4500", "fear" = "#8B0000", 
@@ -217,14 +202,12 @@ pie_chart <- ggplot(emotion_summary, aes(x = "", y = percentage, fill = sentimen
 
 print(pie_chart)
 
-# Additional detailed analysis
 cat("\n=== Detailed Sentiment Analysis ===\n")
 cat("Total posts analyzed:", nrow(post_sentiment), "\n")
 cat("Posts with positive sentiment:", sum(post_sentiment$overall_sentiment == "Positive"), "\n")
 cat("Posts with negative sentiment:", sum(post_sentiment$overall_sentiment == "Negative"), "\n")
 cat("Posts with neutral sentiment:", sum(post_sentiment$overall_sentiment == "Neutral"), "\n")
 
-# Top sentiment words by category
 cat("\n=== Top Sentiment Words ===\n")
 for(sentiment_cat in c("Positive", "Negative")) {
   cat("\nTop", sentiment_cat, "words:\n")
@@ -240,7 +223,6 @@ for(sentiment_cat in c("Positive", "Negative")) {
 # Save results to CSV
 #write_csv(sentiment_summary, "sentiment_analysis_results.csv")
 #write_csv(top_sentiment_words, "top_sentiment_words.csv")
-
 #cat("\nAnalysis complete! Results saved to CSV files.\n")
 
 # Some basic clustering using K-Means
@@ -268,7 +250,6 @@ if(nrow(user_emotions) >= 3) {
   kmeans_result <- kmeans(cluster_data[,c("anger_norm", "joy_norm")], centers = 3, nstart = 10)
   cluster_data$cluster <- as.factor(kmeans_result$cluster)
   
-  # Simple scatter plot
   cluster_plot <- ggplot(cluster_data, aes(x = anger_norm, y = joy_norm, color = cluster)) +
     geom_point(size = 3) +
     labs(title = "User Clustering: Anger vs Joy", x = "Anger (normalized)", y = "Joy (normalized)") +
